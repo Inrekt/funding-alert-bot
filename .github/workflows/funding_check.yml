@@ -3,7 +3,7 @@ name: Funding Rate Alert
 on:
   schedule:
     # Запуск каждую минуту (расписание в UTC, формат cron)
-    - cron: "* * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     # Позволяет запустить вручную кнопкой "Run workflow" на GitHub
 
