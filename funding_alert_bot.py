@@ -24,7 +24,7 @@ import requests
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-FUNDING_THRESHOLD = -0.02   # -2% (ccxt отдаёт funding rate как долю)
+FUNDING_THRESHOLD = -0.002   # -2% (ccxt отдаёт funding rate как долю)
 STATE_FILE = "state.json"
 
 # Какие биржи мониторить (названия как в ccxt: https://docs.ccxt.com/#/exchanges)
