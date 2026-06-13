@@ -41,5 +41,5 @@ jobs:
           git config user.email "actions@github.com"
           git add state.json
           git diff --staged --quiet || git commit -m "Update funding state"
-          git pull --rebase origin main
+          git pull --no-rebase -X ours origin main
           git push
