@@ -3,11 +3,11 @@ Telegram-бот: алерты по funding rate на фьючерсах.
 Версия для запуска по расписанию через GitHub Actions (каждые 5 минут).
 
 Функции:
-- Мониторинг 9 бирж: Binance, Bybit, OKX, Gate, Bitget, MEXC, BingX, Kucoin, Hyperliquid
+- Мониторинг бирж: Binance, OKX, Gate, Bitget, BingX, Hyperliquid
 - Алерт когда funding <= -2% (первичный)
 - Обновление каждые 5 минут пока funding держится ниже -2%
 - Алерт о восстановлении когда funding вернулся выше -2%
-- В каждом сообщении: таблица по биржам + памп/дамп за 24ч + движение от лоя/ATH + объём + OI
+- В каждом сообщении: таблица по биржам + памп/дамп за 24ч + объём + OI
 """
 
 import os
@@ -27,13 +27,10 @@ STATE_FILE = "state.json"
 
 EXCHANGES = [
     "binance",
-    "bybit",
     "okx",
     "gate",
     "bitget",
-    "mexc",
     "bingx",
-    "kucoin",
     "hyperliquid",
 ]
 
@@ -86,7 +83,6 @@ def format_countdown(funding_timestamp_ms):
 
 
 def get_base_symbol(symbol: str) -> str:
-    """Извлекает базовый тикер из символа типа 'BTC/USDT:USDT' -> 'BTC'"""
     return symbol.split("/")[0]
 
 
@@ -116,10 +112,6 @@ def fetch_all_funding() -> dict:
 
 
 def fetch_ticker_data(exchange_id: str, symbol: str) -> dict:
-    """
-    Получает расширенные данные по тикеру: цена, объём 24ч, high/low 24ч, OI.
-    Возвращает словарь с данными или пустой словарь при ошибке.
-    """
     try:
         exchange_class = getattr(ccxt, exchange_id)
         exchange = exchange_class({"enableRateLimit": True})
@@ -129,16 +121,14 @@ def fetch_ticker_data(exchange_id: str, symbol: str) -> dict:
 
         result = {}
 
-        # Тикер: цена, объём, high/low за 24ч
         if exchange.has.get("fetchTicker"):
             ticker = exchange.fetch_ticker(symbol)
             result["price"] = ticker.get("last") or ticker.get("close")
             result["volume_24h"] = ticker.get("quoteVolume") or ticker.get("baseVolume")
             result["high_24h"] = ticker.get("high")
             result["low_24h"] = ticker.get("low")
-            result["change_24h_pct"] = ticker.get("percentage")  # % изменения за 24ч
+            result["change_24h_pct"] = ticker.get("percentage")
 
-        # Open Interest
         if exchange.has.get("fetchOpenInterest"):
             try:
                 oi = exchange.fetch_open_interest(symbol)
@@ -154,10 +144,6 @@ def fetch_ticker_data(exchange_id: str, symbol: str) -> dict:
 
 
 def aggregate_market_data(all_data: dict, symbol: str) -> dict:
-    """
-    Агрегирует рыночные данные по символу со всех бирж.
-    Берёт среднюю цену, суммирует объёмы, берёт абсолютный high/low.
-    """
     prices = []
     volumes = []
     highs = []
@@ -165,19 +151,15 @@ def aggregate_market_data(all_data: dict, symbol: str) -> dict:
     changes = []
     oi_total = 0
 
-    # Берём данные с биржи где сработал алерт (там уже есть markPrice)
     for exchange_id, rates in all_data.items():
         data = rates.get(symbol, {})
         if not data:
             continue
-
         price = data.get("markPrice") or data.get("indexPrice")
         if price:
             prices.append(price)
 
-    # Дополнительно тянем тикер с Binance (самые надёжные данные по high/low/volume)
-    # и с других бирж где есть монета
-    for exchange_id in ["binance", "bybit", "gate"]:
+    for exchange_id in ["binance", "gate", "okx"]:
         if symbol in all_data.get(exchange_id, {}):
             ticker = fetch_ticker_data(exchange_id, symbol)
             if ticker.get("price"):
@@ -211,7 +193,6 @@ def aggregate_market_data(all_data: dict, symbol: str) -> dict:
 
 
 def format_number(n, decimals=2) -> str:
-    """Форматирует число с суффиксами K/M/B для больших значений."""
     if n is None:
         return "N/A"
     if n >= 1_000_000_000:
@@ -224,7 +205,6 @@ def format_number(n, decimals=2) -> str:
 
 
 def build_comparison_table(all_data: dict, symbol: str) -> str:
-    """Строит таблицу сравнения funding rate по всем биржам для данной пары."""
     header = f"{'Exc.':<12}| {'Price':<10}| {'Funding':<10}| Countdown"
     lines = [header]
 
@@ -244,7 +224,6 @@ def build_comparison_table(all_data: dict, symbol: str) -> str:
 
         rows.append((rate or 0, f"{exchange_id.upper():<12}| {price_str:<10}| {rate_str:<10}| {countdown}"))
 
-    # Сортируем по funding rate (самые низкие сверху)
     rows.sort(key=lambda x: x[0])
     lines.extend(row[1] for row in rows)
 
@@ -252,9 +231,7 @@ def build_comparison_table(all_data: dict, symbol: str) -> str:
 
 
 def build_market_summary(market: dict, symbol: str) -> str:
-    """Строит блок с рыночной статистикой."""
     lines = []
-    base = get_base_symbol(symbol)
 
     avg_price = market.get("avg_price")
     change = market.get("change_24h_pct")
@@ -272,7 +249,6 @@ def build_market_summary(market: dict, symbol: str) -> str:
         lines.append(f"{emoji} 24ч {direction}: {change:+.2f}%")
 
     if high and low and avg_price:
-        # Движение от лоя (если памп) или от хая (если дамп)
         if change is not None and change >= 0:
             from_low = ((avg_price - low) / low * 100) if low > 0 else 0
             lines.append(f"🚀 От лоя 24ч: +{from_low:.2f}%")
@@ -297,7 +273,7 @@ def build_alert_message(
     trigger_rate: float,
     all_data: dict,
     market: dict,
-    alert_type: str,  # "new", "update", "recovery"
+    alert_type: str,
     minutes_below: int = 0,
 ) -> str:
 
@@ -316,7 +292,7 @@ def build_alert_message(
             f"Funding держится ниже -2% уже {minutes_below} мин\n"
             f"Биржа: {trigger_exchange} | {trigger_rate * 100:.3f}%"
         )
-    else:  # recovery
+    else:
         header = (
             f"✅ *Funding вернулся в норму*\n"
             f"Биржа: {trigger_exchange} | Пара: {symbol}\n"
@@ -338,14 +314,15 @@ def main():
                 continue
 
             key = f"{exchange_id}:{symbol}"
-            prev = state.get(key, {})
-            # prev структура: {"below": bool, "first_ts": int, "last_update_ts": int}
+
+            # Совместимость со старым форматом (bool) и новым (dict)
+            raw = state.get(key, {})
+            prev = raw if isinstance(raw, dict) else {"below": bool(raw)}
 
             was_below = prev.get("below", False)
             is_below = rate <= FUNDING_THRESHOLD
 
             if is_below and not was_below:
-                # Новый алерт — funding только что упал ниже порога
                 market = aggregate_market_data(all_data, symbol)
                 msg = build_alert_message(symbol, exchange_id, rate, all_data, market, "new")
                 send_telegram_message(msg)
@@ -356,7 +333,6 @@ def main():
                 }
 
             elif is_below and was_below:
-                # Уже был ниже — проверяем, пора ли слать обновление (каждые 5 минут)
                 last_update = prev.get("last_update_ts", now_ts)
                 first_ts = prev.get("first_ts", now_ts)
                 minutes_below = (now_ts - first_ts) // 60
@@ -374,7 +350,6 @@ def main():
                     }
 
             elif not is_below and was_below:
-                # Funding вернулся выше порога
                 market = aggregate_market_data(all_data, symbol)
                 msg = build_alert_message(symbol, exchange_id, rate, all_data, market, "recovery")
                 send_telegram_message(msg)
